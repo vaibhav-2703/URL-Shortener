@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateUser, generateToken } from '@/lib/auth';
+import { authenticateUser, generateAccessToken, createRefreshToken, buildAuthCookies } from '@/lib/auth';
 import { withRateLimit, withSecurityHeaders, sanitizeInput } from '@/lib/security-middleware';
 import { isValidEmail } from '@/lib/security';
 
@@ -43,11 +43,12 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const token = generateToken({
+  const token = generateAccessToken({
       userId: user.id,
       email: user.email,
       name: user.name
     });
+  const refresh = await createRefreshToken(user.id);
 
     // Create response with token in httpOnly cookie
     const response = NextResponse.json({
@@ -59,14 +60,10 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Set secure httpOnly cookie
-    response.cookies.set('auth-token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict', // Changed from 'lax' to 'strict' for better security
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-      path: '/'
-    });
+    // Set cookies
+    for (const c of buildAuthCookies(token, refresh)) {
+      response.cookies.set(c.name, c.value, c.options as any);
+    }
 
     return withSecurityHeaders(response);
   } catch (error) {
